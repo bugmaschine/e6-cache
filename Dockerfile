@@ -1,4 +1,3 @@
-# Use Go 1.23 bookworm as base image
 FROM golang:1.24.3-bookworm AS base
 
 WORKDIR /build
@@ -9,7 +8,7 @@ RUN go mod download
 
 COPY src/. .
 
-RUN go build -o e6-cache
+RUN go build -o e6-cache -ldflags "-X main.debugMode=false"
 
 EXPOSE 8080
 

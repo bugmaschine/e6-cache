@@ -1,8 +1,9 @@
-name: Build and Publish e6-cache to GHCR
+name: Build and Publish Test Image for Branch to GHCR
 
 on:
-  release:
-    types: [published]
+  push:
+    branches-ignore:
+      - main  # ignore main branch as another file handles it
 
 jobs:
   build-and-push:
@@ -22,8 +23,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract tag name
-        run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+      - name: Get branch name
+        run: echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
+
+      - name: Sanitize branch name for Docker tag
+        run: |
+          SAFE_TAG=$(echo "${BRANCH_NAME}" | tr '/' '-' | tr -cd '[:alnum:]-')
+          echo "SAFE_TAG=$SAFE_TAG" >> $GITHUB_ENV
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -32,5 +38,4 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:${{ env.TAG }}
-            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ env.SAFE_TAG }}
