@@ -21,7 +21,7 @@ func isDebug() bool {
 var (
 	debugMode     string = "false"
 	Database      DB
-	useragentBase = "e6-cache/0.1.0"
+	useragentBase = "e6-cache"
 	port          = ":8080"
 	Key           []byte          // gets randomly generated every launch, and used for signing the urls.
 	maxCacheAge   = 1 * time.Hour // idk what's a good value, but 1 hours seems enough
