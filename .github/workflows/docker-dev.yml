@@ -2,8 +2,8 @@ name: Build and Publish Test Image for Branch to GHCR
 
 on:
   push:
-    branches:
-      - '**'
+    branches-ignore:
+      - main  # ignore main branch as another file handles it
 
 jobs:
   build-and-push:
