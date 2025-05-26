@@ -23,7 +23,7 @@ Because:
 
 ### Start DB and S3 Storage
 ```bash
-git clone https://github.com/bugmaschine/e6-cache
+git clone https://github.com/bugmaschine/e6-cache](https://github.com/bugmaschine/e6-cache.git
 cd e6-cache/dev
 docker compose up -d
 ```
@@ -44,7 +44,7 @@ You get:
 > Make sure to set the environment variables in the `docker-compose.yml` file.
 
 ```bash
-git clone https://github.com/bugmaschine/e6-cache
+git clone https://github.com/bugmaschine/e6-cache.git
 cd e6-cache
 docker compose up -d
 ```
