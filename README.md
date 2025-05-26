@@ -51,7 +51,7 @@ docker compose up -d
 
 After the container is running, you can access the API at `http://localhost:8080`, and set it as your e621 instance in your Client of choice.
 
-## Time Comparison (Speed depending on your internet speed, and database speed)
+## Speed Comparison (Speed depends on your internet, and database speed)
 
 ### Image 1:
 - **Normal e621 image load:** 2.859s
