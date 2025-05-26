@@ -1,0 +1,409 @@
+package main
+
+import (
+	"bugmaschine/e6-cache/dualreader"
+	"bugmaschine/e6-cache/logging"
+	"bytes"
+	"compress/flate"
+	"compress/gzip"
+	"compress/zlib"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"io"
+	"net/http"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/andybalholm/brotli"
+	"github.com/gin-gonic/gin"
+)
+
+var (
+	// honestly just copying only the auth header and maybe adding compression headers might be far easier.
+	// TODO: change this someday
+	headersToSkip = []string{
+		"user-agent", "via", "host", "content-Length", "x-forwarded-for", "x-real-ip", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-for",
+	}
+)
+
+func makeProxyLink(original string) string {
+	if original == "" { // in case the input is empty, just return an empty string
+		logging.Warn("Received empty URL for proxying")
+		return ""
+	}
+	// basically get the part after "data/" in the url
+	re := regexp.MustCompile(`data/(.+)`)
+	match := re.FindStringSubmatch(original)
+
+	sig := Signer.Sign(original)
+
+	// We sign the url so a malicious attacker can't just change the url to download any file. But this also means that the signature changes every restart.
+	encodedUrl := base64.URLEncoding.EncodeToString([]byte(original))
+
+	// if the route changes, we need to update this
+	proxiedURL := PROXY_URL + "/proxy/" + encodedUrl + "?sig=" + sig
+
+	logging.Info("Creating proxy url for file: ", original, " | ID: ", match[1], " | Proxied URL: ", proxiedURL)
+
+	return proxiedURL
+}
+
+func proxyAndTransform(c *gin.Context) {
+	// Construct full target URL
+	originalURL := baseURL + c.Request.URL.Path
+	if c.Request.URL.RawQuery != "" {
+		originalURL += "?" + c.Request.URL.RawQuery
+	}
+
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+		return
+	}
+	c.Request.Body.Close()
+
+	// Create the proxied request with the copied body
+	req, err := http.NewRequest(c.Request.Method, originalURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to create proxy request"})
+		return
+	}
+
+	// Copy headers
+	copyHeaders(c.Request.Header, req.Header)
+
+	// useragent stuff
+	setUseragent(c, req)
+
+	logging.Debug("Host: ", c.Request.Host)
+	logging.Debug("Headers: ", c.Request.Header)
+	logging.Debug("Proxied Headers: ", req.Header)
+
+	// Perform request
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": "Failed to reach backend"})
+		return
+	}
+	defer resp.Body.Close()
+
+	var reader io.ReadCloser
+
+	// https://stackoverflow.com/questions/13130341/reading-gzipped-http-response-in-go
+	switch resp.Header.Get("Content-Encoding") {
+	case "gzip":
+		logging.Debug("Server sent gzip compressed response")
+
+		reader, err = gzip.NewReader(resp.Body)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "gzip decompression failed"})
+			return
+		}
+		defer reader.Close()
+
+	case "deflate":
+		logging.Debug("Server sent deflate compressed response")
+
+		reader = flate.NewReader(resp.Body)
+		defer reader.Close()
+
+	case "compress":
+		logging.Debug("Server sent standard compressed response")
+
+		reader, err = zlib.NewReader(resp.Body)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "compress decompression failed"})
+			return
+		}
+		defer reader.Close()
+
+	case "br":
+		logging.Debug("Server sent brotli compressed response")
+
+		reader = io.NopCloser(brotli.NewReader(resp.Body))
+		defer reader.Close()
+
+	default:
+		reader = resp.Body
+	}
+
+	//Accept-Encoding:[gzip, compress, deflate, br]
+
+	// Read response body
+	respBody, err := io.ReadAll(reader)
+
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response body"})
+		return
+	}
+	// check for rate limit
+	if resp.StatusCode == 501 {
+		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Rate limit exceeded"})
+		return
+	}
+
+	logging.Debug("Response Body: ", string(respBody))
+
+	switch {
+	case strings.HasSuffix(c.Request.URL.Path, "/comments.json") && c.Query("search[post_id]") != "": // specific post comments are returned differently
+		var comments []Comment
+
+		if err := json.Unmarshal(respBody, &comments); err != nil {
+			// it failed to unmahrshal because the api returned "commments": []
+			var comments CommentsResponse
+			if err := json.Unmarshal(respBody, &comments); err != nil {
+
+				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid response format", "ok": false})
+				return
+			}
+			respBody, _ = json.Marshal(comments)
+			return
+		}
+
+		logging.Info("Saving ", len(comments), " comments")
+		Database.SaveComments(comments)
+		respBody, _ = json.Marshal(comments)
+	case strings.HasSuffix(c.Request.URL.Path, "/posts.json") || strings.HasSuffix(c.Request.URL.Path, "/comments.json"): // comments and posts seem to be the same thing
+		var posts PostsResponse
+
+		if err := json.Unmarshal(respBody, &posts); err != nil {
+			logging.Debug("Response Body: ", string(respBody))
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid response format", "ok": false})
+			return
+		}
+
+		for i := range posts.Posts {
+			ProcessPost(c, &posts.Posts[i])
+		}
+
+		respBody, _ = json.Marshal(posts)
+	case strings.HasPrefix(c.Request.URL.Path, "/posts/"):
+		var post PostResponse
+
+		if err := json.Unmarshal(respBody, &post); err != nil {
+
+			logging.Debug("Response Body: ", string(respBody))
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid response format", "ok": false})
+			return
+		}
+
+		ProcessPost(c, &post.Post)
+
+		respBody, _ = json.Marshal(post)
+	case strings.HasSuffix(c.Request.URL.Path, "/pools.json"):
+		var pools []Pool
+
+		if err := json.Unmarshal(respBody, &pools); err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid response format", "ok": false})
+			return
+		}
+
+		for _, pool := range pools {
+			// Store in DB
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			Database.UpdatePool(ctx, &pool)
+		}
+
+		respBody, _ = json.Marshal(pools)
+	case strings.Contains(c.Request.URL.Path, "/pools/"):
+		var pool Pool
+
+		if err := json.Unmarshal(respBody, &pool); err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid response format", "ok": false})
+			return
+		}
+
+		// Store in DB
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		Database.UpdatePool(ctx, &pool)
+
+		respBody, _ = json.Marshal(pool)
+	}
+
+	// Send client response
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
+}
+
+func proxyFile(c *gin.Context) {
+	fileID := c.Param("File_ID")
+	sig := c.Query("sig")
+
+	if sig == "" {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Missing signature", "ok": false})
+		return
+	}
+
+	url, err := base64.URLEncoding.DecodeString(fileID)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid file ID", "ok": false})
+		return
+	}
+
+	if !Signer.Verify(string(url), sig) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid signature", "ok": false})
+		return
+	}
+
+	// get the filename from the fileID
+	re := regexp.MustCompile(`/data/(.*)`)
+	matches := re.FindStringSubmatch(string(url))
+
+	CleanFileID := matches[1]
+
+	fileExists, err := S3.DoesFileExistInS3(c, string(CleanFileID))
+	c.Header("Cache-Control", "public, max-age="+strconv.Itoa(int(maxCacheAge.Seconds())))
+	c.Header("Expires", time.Now().Add(time.Duration(maxCacheAge)*time.Second).Format(http.TimeFormat))
+
+	if fileExists && err == nil {
+		logging.Info("File exists in S3, downloading: ", string(url))
+
+		body, err := S3.StreamFromS3(c, string(CleanFileID))
+		if err != nil {
+			logging.Error("Error downloading from S3: ", err)
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to download from S3", "ok": false})
+			return
+		}
+
+		// dont know if streaming from s3 is actually possible, but let's pretend it is
+		contentLength, _ := S3.GetContentLength(c, string(CleanFileID))
+		if body == nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to download from S3", "ok": false})
+			return
+		}
+
+		var contentType string
+		switch ext := filepath.Ext(string(CleanFileID)); ext {
+		// Images
+		case ".jpg", ".jpeg":
+			contentType = "image/jpeg"
+		case ".png":
+			contentType = "image/png"
+		case ".gif":
+			contentType = "image/gif"
+		case ".webp":
+			contentType = "image/webp"
+		case ".bmp":
+			contentType = "image/bmp"
+		case ".tiff", ".tif":
+			contentType = "image/tiff"
+
+		// Videos
+		case ".webm":
+			contentType = "video/webm"
+		case ".mp4":
+			contentType = "video/mp4"
+		case ".mov":
+			contentType = "video/quicktime"
+		case ".avi":
+			contentType = "video/x-msvideo"
+		case ".mkv":
+			contentType = "video/x-matroska"
+		case ".flv":
+			contentType = "video/x-flv"
+		case ".ogv":
+			contentType = "video/ogg"
+
+		default:
+			contentType = "application/octet-stream"
+		}
+
+		c.DataFromReader(200, contentLength, contentType, body, nil)
+		return
+	}
+
+	// below only gets called when file does not exist in S3
+	logging.Debug("File not found in S3. Requesting it.")
+
+	// download the image from the api
+	req, _ := http.NewRequest("GET", string(url), nil)
+	setUseragent(c, req)
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to proxy request", "ok": false})
+		return
+	}
+	defer resp.Body.Close()
+
+	// some magic to handle streaming the response body to S3 and to the user at the same time
+	dual := dualreader.NewDualReader(resp.Body)
+	r1, r2 := dual.Readers()
+
+	// upload to S3 in the background, while the user is downloading the file
+	go func() {
+		logging.Info("Uploading to S3: ", string(CleanFileID))
+		err := S3.UploadToS3(c, r1, string(CleanFileID))
+		if err != nil {
+			logging.Error("Failed to upload to S3", err)
+		}
+		logging.Info("Upload to S3 complete: ", string(CleanFileID))
+	}()
+
+	// Stream live to user (I hope it's actually streaming)
+	c.DataFromReader(resp.StatusCode, resp.ContentLength, resp.Header.Get("Content-Type"), r2, nil)
+}
+
+func copyHeaders(src http.Header, dst http.Header) {
+	skip := make(map[string]struct{}, len(headersToSkip))
+
+	for _, h := range headersToSkip {
+		// convert to lowercase
+		skip[strings.ToLower(h)] = struct{}{}
+	}
+
+	for k, vv := range src {
+		// skip headers that are in the skip list
+		if _, found := skip[strings.ToLower(k)]; found {
+			continue // skip this header
+		}
+		// if not found, add the header to the destination
+		for _, v := range vv {
+			dst.Add(k, v)
+		}
+	}
+}
+
+func ProcessPost(c *gin.Context, post *Post) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	Database.CheckAndInsertPost(ctx, post)
+
+	// Rewrite url to go through proxy
+	post.File.URL = makeProxyLink(post.File.URL)
+	post.Preview.URL = makeProxyLink(post.Preview.URL)
+	post.Sample.URL = makeProxyLink(post.Sample.URL)
+}
+
+func setUseragent(c *gin.Context, req *http.Request) {
+	auth := c.Request.Header.Get("Authorization")
+
+	var useragent string
+
+	if auth == "" {
+		useragent = useragentBase
+		req.Header.Set("User-Agent", useragent)
+		return
+	}
+
+	// parse the Authorization header
+	auth = strings.ReplaceAll(auth, "Basic ", "")
+	decodedAuth, _ := base64.URLEncoding.DecodeString(auth)
+	splitAuth := strings.Split(string(decodedAuth), ":") // 0 is username, 1 is api key
+
+	if splitAuth[0] == "" {
+		useragent = useragentBase
+		req.Header.Set("User-Agent", useragent)
+		return
+	}
+
+	//finally assemble the useragent
+	useragent = useragentBase + " (Request made on behalf of " + splitAuth[0] + ")"
+
+	req.Header.Set("User-Agent", useragent)
+}

@@ -1,0 +1,61 @@
+version: "3.9"
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: e6cache
+      POSTGRES_USER: e6cache
+      POSTGRES_PASSWORD: replaceThisWithARandomPassword
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+
+  e6-cache:
+    image: ghcr.io/bugmaschine/e6-cache:latest
+    restart: unless-stopped
+    environment:
+      # PostgreSQL
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: e6cache
+      DB_USER: e6cache
+      DB_PASS: replaceThisWithARandomPassword
+      # MinIO (or anything S3-compatible, like AWS S3)
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: e6cache-media
+      S3_REGION: us-east-1
+      # Proxy settings
+      PROXY_URL: http://localhost:8080 # Set this to the Server IP / URL, as otherwise the proxy will not work.
+      E6_BASE: https://e621.net
+    depends-on:
+      - minio
+      - db
+    ports:
+      - "8080:8080" # Point this to an Reverse Proxy and set the Proxy Url acordingly.
+
+
+  createbuckets:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5; # Waits for startup
+      /usr/bin/mc alias set minio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb --ignore-existing minio/e6cache;
+      exit 0;
+      "   
+volumes:
+  db_data:
+  minio_data:
