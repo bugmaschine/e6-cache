@@ -40,11 +40,16 @@ You get:
 > [!WARNING]  
 > Don't just copy the `docker-compose.yml` file, as other files are required for the inital setup to work.
 
+> [!NOTE]
+> Make sure to set the environment variables in the `docker-compose.yml` file.
+
 ```bash
 git clone https://github.com/bugmaschine/e6-cache
 cd e6-cache
 docker compose up -d
 ```
+
+After the container is running, you can access the API at `http://localhost:8080`, and set it as your e621 instance in your Client of choice.
 
 ## Time Comparison (Speed depending on your internet speed, and database speed)
 
