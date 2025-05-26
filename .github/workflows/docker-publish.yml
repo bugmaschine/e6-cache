@@ -26,17 +26,13 @@ jobs:
       - name: Get latest tag and bump version
         id: versioning
         run: |
-          latest_tag=$(git tag --sort=-v:refname | head -n 1)
+          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "Latest tag: $latest_tag"
 
-          if [[ "$latest_tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            major=${BASH_REMATCH[1]}
-            minor=${BASH_REMATCH[2]}
-            patch=${BASH_REMATCH[3]}
-            new_tag="v${major}.$((minor)).$((patch+1))"
-          else
-            new_tag="v0.1.0"
-          fi
+          IFS='.' read -r major minor patch <<< "${latest_tag#v}"
+
+          patch=$((patch + 1))
+          new_tag="v${major}.${minor}.${patch}"
 
           echo "New tag: $new_tag"
           echo "NEW_TAG=$new_tag" >> $GITHUB_ENV
