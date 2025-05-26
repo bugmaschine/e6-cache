@@ -1,19 +1,56 @@
 name: Build and Publish e6-cache to GHCR
 
 on:
-  release:
-    types: [published]
+  push:
+    branches:
+      - main
 
 jobs:
-  build-and-push:
+  bump-version-build-push:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # so we can fetch tags
+
+      - name: Set up Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Get latest tag and bump version
+        id: versioning
+        run: |
+          latest_tag=$(git tag --sort=-v:refname | head -n 1)
+          echo "Latest tag: $latest_tag"
+
+          if [[ "$latest_tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            major=${BASH_REMATCH[1]}
+            minor=${BASH_REMATCH[2]}
+            patch=${BASH_REMATCH[3]}
+            new_tag="v${major}.$((minor)).$((patch+1))"
+          else
+            new_tag="v0.1.0"
+          fi
+
+          echo "New tag: $new_tag"
+          echo "NEW_TAG=$new_tag" >> $GITHUB_ENV
+
+      - name: Create Git tag and release
+        run: |
+          git tag $NEW_TAG
+          git push origin $NEW_TAG
+
+          gh release create $NEW_TAG \
+            --title "$NEW_TAG" \
+            --notes "Auto-release $NEW_TAG"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -22,9 +59,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract tag name
-        run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -32,5 +66,5 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:${{ env.TAG }}
+            ghcr.io/${{ github.repository }}:${{ env.NEW_TAG }}
             ghcr.io/${{ github.repository }}:latest
