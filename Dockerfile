@@ -12,7 +12,7 @@ RUN go build -o e6-cache -ldflags "-X main.debugMode=false"
 
 # copy to simpler image
 FROM scratch
-COPY --from=build /bin/e6-cache /bin/e6-cache
+COPY --from=build /build/e6-cache /bin/e6-cache
 CMD ["/bin/e6-cache"]
 
 EXPOSE 8080
