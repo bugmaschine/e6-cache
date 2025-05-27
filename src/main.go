@@ -21,7 +21,7 @@ func isDebug() bool {
 var (
 	debugMode     string = "false"
 	Database      DB
-	useragentBase = "e6-cache"
+	useragentBase = "e6-cache (https://github.com/bugmaschine/e6-cache)"
 	port          = ":8080"
 	Key           []byte          // gets randomly generated every launch, and used for signing the urls.
 	maxCacheAge   = 1 * time.Hour // idk what's a good value, but 1 hours seems enough
@@ -45,8 +45,9 @@ var (
 	DB_PASS string
 
 	// Proxy settings
-	PROXY_URL string
-	baseURL   string
+	PROXY_URL  string
+	baseURL    string
+	PROXY_AUTH string
 )
 
 func loadEnv() {
@@ -74,6 +75,13 @@ func loadEnv() {
 	// Proxy Settings
 	PROXY_URL = os.Getenv("PROXY_URL")
 	baseURL = os.Getenv("E6_BASE")
+	PROXY_AUTH = os.Getenv("PROXY_AUTH")
+
+	if PROXY_AUTH != "" {
+		logging.Debug("Proxy auth is enabled with key: ", PROXY_AUTH)
+	} else {
+		logging.Debug("Proxy auth is disabled")
+	}
 
 }
 
