@@ -35,12 +35,12 @@ You get:
 * PostgreSQL database (`localhost:5432`, user: `dev`, pass: `devpass`)
 * MinIO S3 storage (`localhost:9000`, user/pass: `minioadmin` ui: `http://localhost:9010`)
 
-## Production Setup
+## Production Setup / Server Setup
 
 > [!WARNING]  
 > Don't just copy the `docker-compose.yml` file, as other files are required for the inital setup to work.
 
-> [!NOTE]
+> [!IMPORTANT]
 > Make sure to set the environment variables in the `docker-compose.yml` file.
 
 ```bash
@@ -50,6 +50,25 @@ docker compose up -d
 ```
 
 After the container is running, you can access the API at `http://localhost:8080`, and set it as your e621 instance in your Client of choice.
+
+## Client Setup
+
+For most users i recommend using [e1547](https://github.com/clragon/e1547) as it has built-in support for custom instances.
+
+### e1547 Setup
+> [!IMPORTANT]
+> You need to have an public URL for the API to work with e1547, as it requires https.
+
+
+### The Wolf's Stash Setup
+For The Wolf's Stash, it just reports the host not being supported.
+
+
+### Other Clients
+Feel free to open a PR to add support for other clients.
+
+
+
 
 ## Speed Comparison (Speed depends on your internet, and database speed)
 
@@ -69,6 +88,7 @@ After the container is running, you can access the API at `http://localhost:8080
 * Proxy Mode (it act's like a proxy and redirects all e621 requests to e6-cache)
 * Firefox Extension (to make it easier to use by replacing all e621 links with e6-cache links)
 * Offline Mode (to use the cache without internet connection, like a local e621)
+* Website (basically a mirror of e621, but with the cache enabled)
 
 ## Architecture
 
