@@ -53,6 +53,51 @@ func makeProxyLink(original string) string {
 }
 
 func proxyAndTransform(c *gin.Context) {
+
+	logging.Debug("Headers: ", c.Request.Header)
+
+	auth := c.Request.Header.Get("Authorization")
+
+	requestUsername := ""
+	// if proxy auth is enabled, check for auth header
+	if PROXY_AUTH != "" {
+		if auth == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			return
+		}
+
+		// an auth header should normaly look like this: base64 hashed username:password
+		// ours should look like this username:proxy_auth:password
+		// the idea is that the user enters their username and then a colon and then the proxy auth. Because most clients dont support colons in the api key, but will accept it in user names
+		auth = strings.TrimPrefix(auth, "Basic ")
+		decodedAuth, err := base64.StdEncoding.DecodeString(auth)
+		if err != nil {
+			logging.Error("Error decoding auth header: ", err)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			return
+		}
+		// parse it into username, password and proxy auth
+		authParts := strings.Split(string(decodedAuth), ":")
+		suppliedProxyAuth := authParts[1] // if you want to check the password, set it to 2
+		if len(authParts) != 3 || suppliedProxyAuth != PROXY_AUTH {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			return
+		}
+
+		c.Request.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(authParts[0]+":"+authParts[2])))
+	} else {
+
+		if auth == "" {
+			requestUsername = "anonymous"
+		}
+
+		// parse the Authorization header
+		auth = strings.ReplaceAll(auth, "Basic ", "")
+		decodedAuth, _ := base64.URLEncoding.DecodeString(auth)
+		splitAuth := strings.Split(string(decodedAuth), ":")
+		requestUsername = splitAuth[0] // 0 is username, 1 is api key
+	}
+
 	// Construct full target URL
 	originalURL := baseURL + c.Request.URL.Path
 	if c.Request.URL.RawQuery != "" {
@@ -77,10 +122,9 @@ func proxyAndTransform(c *gin.Context) {
 	copyHeaders(c.Request.Header, req.Header)
 
 	// useragent stuff
-	setUseragent(c, req)
+	setUseragent(requestUsername, req)
 
 	logging.Debug("Host: ", c.Request.Host)
-	logging.Debug("Headers: ", c.Request.Header)
 	logging.Debug("Proxied Headers: ", req.Header)
 
 	// Perform request
@@ -322,7 +366,9 @@ func proxyFile(c *gin.Context) {
 
 	// download the image from the api
 	req, _ := http.NewRequest("GET", string(url), nil)
-	setUseragent(c, req)
+
+	// i dont think the username is required for downloading files
+	setUseragent("", req)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -380,30 +426,15 @@ func ProcessPost(c *gin.Context, post *Post) {
 	post.Sample.URL = makeProxyLink(post.Sample.URL)
 }
 
-func setUseragent(c *gin.Context, req *http.Request) {
-	auth := c.Request.Header.Get("Authorization")
-
+func setUseragent(username string, req *http.Request) {
 	var useragent string
-
-	if auth == "" {
+	if len(username) < 1 { // if it's too small, then forget about it
 		useragent = useragentBase
 		req.Header.Set("User-Agent", useragent)
 		return
 	}
 
-	// parse the Authorization header
-	auth = strings.ReplaceAll(auth, "Basic ", "")
-	decodedAuth, _ := base64.URLEncoding.DecodeString(auth)
-	splitAuth := strings.Split(string(decodedAuth), ":") // 0 is username, 1 is api key
-
-	if splitAuth[0] == "" {
-		useragent = useragentBase
-		req.Header.Set("User-Agent", useragent)
-		return
-	}
-
-	//finally assemble the useragent
-	useragent = useragentBase + " (Request made on behalf of " + splitAuth[0] + ")"
+	useragent = useragentBase + " (Request made on behalf of " + username + ")"
 
 	req.Header.Set("User-Agent", useragent)
 }
