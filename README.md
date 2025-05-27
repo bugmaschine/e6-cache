@@ -19,6 +19,15 @@ Because:
 * Stores it in a local PostgreSQL database
 * Saves media files in your own S3-compatible bucket
 
+## Features
+
+* **Transparent Proxy**: Redirects all requests through e6-cache, then to your chosen instance.
+* **Passive Caching**: Automatically caches every post you view.
+* **Local Storage**: Stores metadata in a local PostgreSQL database and media files in your own S3-compatible bucket.
+* **Customizable**: Easily configurable to work with any e621-compatible instance.
+* **Self-Hosted**: Runs on your own server, giving you full control over your data.
+* **Authentication**: Supports authentication for secure access, even when exposed to the world.
+
 ## Dev Setup
 
 ### Start DB and S3 Storage
@@ -66,6 +75,7 @@ For The Wolf's Stash, it just reports the host not being supported.
 
 ### Other Clients
 Feel free to open a PR to add documentation for other clients.
+
 
 ## Speed Comparison (Speed depends on your internet, and database speed)
 

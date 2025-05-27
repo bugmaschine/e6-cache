@@ -41,6 +41,7 @@ services:
       # Proxy settings
       PROXY_URL: http://localhost:8080 # Set this to the Server IP / URL, as otherwise the proxy will not work.
       E6_BASE: https://e621.net
+      PROXY_AUTH: "" # Leave empty to disable proxy auth append like this to your username "Username:YourPassword"
     ports:
       - "8080:8080" # Point this to an Reverse Proxy and set the Proxy Url acordingly.
 
@@ -49,13 +50,18 @@ services:
     image: minio/mc
     depends_on:
       - minio
-    entrypoint: >
-      /bin/sh -c "
-      sleep 5; # Waits for startup
-      /usr/bin/mc alias set minio http://minio:9000 minioadmin minioadmin;
-      /usr/bin/mc mb --ignore-existing minio/e6cache-media;
-      exit 0;
-      "   
+    entrypoint: 
+      - /bin/sh
+      - -c
+      - |
+        echo "Waiting for MinIO to be ready..."
+        until /usr/bin/mc alias set minio http://minio:9000 minioadmin minioadmin; do
+          echo "MinIO not ready yet, retrying in 2s..."
+          sleep 2
+        done
+        /usr/bin/mc alias set minio http://minio:9000 minioadmin minioadmin;
+        /usr/bin/mc mb minio/e6cache-media --ignore-existing;
+        exit 0; 
 volumes:
   db_data:
   minio_data:
