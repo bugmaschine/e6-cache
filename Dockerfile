@@ -8,11 +8,11 @@ RUN go mod download
 
 COPY src/. .
 
-RUN go build -o e6-cache -ldflags "-X main.debugMode=false"
+RUN CGO_ENABLED=0 GOOS=linux go build -o e6-cache -ldflags "-s -w -X main.debugMode=false"
 
 # copy to simpler image
-FROM scratch
-COPY --from=build /build/e6-cache /bin/e6-cache
-CMD ["/bin/e6-cache"]
+FROM alpine:latest
+COPY --from=build /build/e6-cache /build/e6-cache
+CMD ["/build/e6-cache"]
 
 EXPOSE 8080
