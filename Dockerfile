@@ -1,4 +1,4 @@
-FROM golang:1.24.3-bookworm AS base
+FROM golang:1.24.3-bookworm AS build
 
 WORKDIR /build
 
@@ -10,6 +10,9 @@ COPY src/. .
 
 RUN go build -o e6-cache -ldflags "-X main.debugMode=false"
 
-EXPOSE 8080
+# copy to simpler image
+FROM scratch
+COPY --from=build /build/e6-cache /bin/e6-cache
+CMD ["/bin/e6-cache"]
 
-CMD ["/build/e6-cache"]
+EXPOSE 8080
