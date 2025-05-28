@@ -4,11 +4,16 @@ import (
 	"bugmaschine/e6-cache/logging"
 	"context"
 	_ "embed"
+	"fmt"
+	"log"
 	"os"
+	"regexp"
 	"strconv"
 	"time"
 
 	"bugmaschine/e6-cache/signer"
+
+	"github.com/getkin/kin-openapi/openapi3"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -49,6 +54,9 @@ var (
 	PROXY_URL  string
 	baseURL    string
 	PROXY_AUTH string
+
+	//go:embed openapi.yaml
+	openApiRoutes []byte // embedded OpenAPI routes, used to dynamically register the routes in the gin router.
 )
 
 func loadEnv() {
@@ -125,45 +133,26 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	router.ForwardedByClientIP = true
-	router.Use(gin.Recovery())
+	// load e621 routes
+	loader := openapi3.NewLoader()
+	doc, err := loader.LoadFromData(openApiRoutes)
+	if err != nil {
+		log.Fatalf("Failed to load OpenAPI: %v (make sure to run 'go embed')", err)
+	}
 
-	// Routes implementing caching
+	// create a regex to convert OpenAPI path parameters {id} to gins format :id
+	re := regexp.MustCompile(`\{(.+?)\}`)
 
-	router.GET("/posts.json", proxyAndTransform)
-	router.GET("/posts/:Post_ID.json", proxyAndTransform)
-	router.GET("/pools.json", proxyAndTransform)
-	router.GET("/pools/:Pool_ID", proxyAndTransform)
-	router.GET("/comments.json", proxyAndTransform) // this for reason just returns posts?????????
+	for _, path := range doc.Paths.InMatchingOrder() {
+		pathItem := doc.Paths.Find(path)
+		// convert OpenAPI parameter syntax to Gin parameter syntax, with the problem being that gin has problems supporting that
+		convertedPath := re.ReplaceAllString(path, ":$1")
+		for method := range pathItem.Operations() {
+			router.Handle(method, convertedPath, proxyAndTransform)
+		}
+	}
 
-	// Routes that could be maybe saved
-
-	router.GET("/notes.json", proxyAndTransform)
-	router.GET("/wiki_pages.json", proxyAndTransform)
-	router.GET("/post_flags.json", proxyAndTransform)
-
-	// Routes just needing proxying and have make no sense being cached
-
-	router.POST("/favorites.json", proxyAndTransform)
-	router.POST("/uploads.json", proxyAndTransform)
-	router.POST("/post_flags.json", proxyAndTransform)
-	router.DELETE("/favorites/:Post_ID", proxyAndTransform)
-	router.POST("/notes.json", proxyAndTransform)
-	router.PUT("/notes/*path", proxyAndTransform)
-	router.DELETE("/notes/:Note_ID", proxyAndTransform)
-	router.POST("/posts/:Post_ID/votes.json", proxyAndTransform)
-	router.GET("/forum_topics.json", proxyAndTransform)
-	router.GET("/forum_posts.json", proxyAndTransform)
-	router.POST("/comments.json", proxyAndTransform)
-	router.PUT("/comments/:Comment_ID", proxyAndTransform)
-	router.DELETE("/comments/:Comment_ID", proxyAndTransform)
-	router.POST("/comments/:Comment_ID/votes.json", proxyAndTransform)
-	router.PUT("/users/:User_ID.json", proxyAndTransform)
-	router.GET("/users/:User_ID.json", proxyAndTransform)
-	router.GET("/tags/*path", proxyAndTransform)
-
-	// potentially just forward to the baseUrl
-	router.PATCH("/posts/:Post_ID", proxyAndTransform)
+	logging.Info(fmt.Sprintf("Registered %d routes from OpenAPI spec", len(doc.Paths.InMatchingOrder())))
 
 	// Proxy files from S3, if not save them.
 	router.GET("/proxy/:File_ID", proxyFile)
