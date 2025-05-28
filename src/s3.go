@@ -49,6 +49,7 @@ func NewS3Service(ctx context.Context, region, endpoint, accessKey, secretKey, b
 
 	uploader := manager.NewUploader(s3Client, func(u *manager.Uploader) {
 		u.PartSize = 10 * 1024 * 1024 // 10MB Parts
+		u.Concurrency = 999999        // give me all the power! (i mean, threads)
 	})
 
 	downloader := manager.NewDownloader(s3Client, func(d *manager.Downloader) {
