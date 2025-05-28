@@ -57,8 +57,8 @@ var (
 	baseURL    string
 	PROXY_AUTH string
 
-	//go:embed openapi.yaml
-	openApiRoutes []byte // embedded OpenAPI routes, used to dynamically register the routes in the gin router.
+	//go:embed "openapi/e621.yaml"
+	e621OpenApiRoutes []byte // embedded OpenAPI routes, used to dynamically register the routes in the gin router.
 )
 
 func loadEnv() {
@@ -135,14 +135,30 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	// load e621 routes
-	loader := openapi3.NewLoader()
-	doc, err := loader.LoadFromData(openApiRoutes)
-	if err != nil {
-		log.Fatalf("Failed to load OpenAPI: %v (make sure to run 'go embed')", err)
-	}
+	// register e621 routes
+	parseOpenAPIRoutes(e621OpenApiRoutes, router)
 
-	// below imports the OpenAPI spec into the router, and does some processing to prevent errors
+	// Proxy files from S3, if not save them.
+	router.GET("/proxy/:fileId", proxyFile)
+
+	router.GET("/", func(c *gin.Context) {
+		c.String(200, "e6-cache is running. Use this as the instance in your preffered client.\n"+
+			"Make sure to set the base URL in your client to: "+PROXY_URL+"\n"+
+			"Server is caching following url: "+baseURL)
+	})
+
+	logging.Info("Started router at ", port)
+	router.Run(port)
+}
+
+func parseOpenAPIRoutes(openapifile []byte, router *gin.Engine) {
+
+	// load all routes from the file
+	loader := openapi3.NewLoader()
+	doc, err := loader.LoadFromData(openapifile)
+	if err != nil {
+		log.Fatalf("Failed to load OpenAPI: %v", err)
+	}
 
 	// create a regex to convert OpenAPI path parameters {id} to Gin's format :id
 	re := regexp.MustCompile(`\{(.+?)\}`)
@@ -195,17 +211,5 @@ func main() {
 	}
 
 	logging.Info(fmt.Sprintf("Registered %d routes from OpenAPI spec", len(doc.Paths.InMatchingOrder())))
-
-	// Proxy files from S3, if not save them.
-	router.GET("/proxy/:fileId", proxyFile)
-
-	router.GET("/", func(c *gin.Context) {
-		c.String(200, "e6-cache is running. Use this as the instance in your preffered client.\n"+
-			"Make sure to set the base URL in your client to: "+PROXY_URL+"\n"+
-			"Server is caching following url: "+baseURL)
-	})
-
-	logging.Info("Started router at ", port)
-	router.Run(port)
 
 }

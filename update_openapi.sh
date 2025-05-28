@@ -1,3 +1,5 @@
-rm ./src/openapi.yaml
+echo "Deleting old routes"
+rm ./src/openapi/e621.yaml
 
-curl -o ./src/openapi.yaml https://raw.githubusercontent.com/DonovanDMC/E621OpenAPI/master/openapi.yaml
+echo "Updating e621 routes"
+curl -o ./src/openapi/e621.yaml https://raw.githubusercontent.com/DonovanDMC/E621OpenAPI/master/openapi.yaml
