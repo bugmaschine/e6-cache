@@ -8,7 +8,9 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"bugmaschine/e6-cache/signer"
@@ -87,9 +89,9 @@ func loadEnv() {
 	PROXY_AUTH = os.Getenv("PROXY_AUTH")
 
 	if PROXY_AUTH != "" {
-		logging.Debug("Proxy auth is enabled with key: ", PROXY_AUTH)
+		logging.Info("Proxy auth is enabled with key: ", PROXY_AUTH)
 	} else {
-		logging.Debug("Proxy auth is disabled")
+		logging.Info("Proxy auth is disabled")
 	}
 
 }
@@ -140,14 +142,39 @@ func main() {
 		log.Fatalf("Failed to load OpenAPI: %v (make sure to run 'go embed')", err)
 	}
 
-	// create a regex to convert OpenAPI path parameters {id} to gins format :id
+	// below imports the OpenAPI spec into the router, and does some processing to prevent errors
+
+	// create a regex to convert OpenAPI path parameters {id} to Gin's format :id
 	re := regexp.MustCompile(`\{(.+?)\}`)
+
+	// regex to remove a file extension from the end like .json, .png, etc.
+	extRegex := regexp.MustCompile(`\.[a-zA-Z0-9]+$`)
+
+	var registeredRoutes []string
 
 	for _, path := range doc.Paths.InMatchingOrder() {
 		pathItem := doc.Paths.Find(path)
-		// convert OpenAPI parameter syntax to Gin parameter syntax, with the problem being that gin has problems supporting that
+		if pathItem == nil {
+			logging.Warn("Path item not found for path: ", path)
+			continue
+		}
+		logging.Debug("Processing path: ", path)
+
+		// convert OpenAPI parameter syntax to Gin parameter syntax
 		convertedPath := re.ReplaceAllString(path, ":$1")
+
+		// remove leading slash and extension
+		convertedPath = strings.TrimPrefix(convertedPath, "/")
+		convertedPath = extRegex.ReplaceAllString(convertedPath, "")
+
+		if slices.Contains(registeredRoutes, convertedPath) {
+			logging.Warn("Duplicate route detected: ", convertedPath)
+			continue
+		}
+
+		registeredRoutes = append(registeredRoutes, convertedPath)
 		for method := range pathItem.Operations() {
+			logging.Debug("Adding route: ", method, " ", convertedPath)
 			router.Handle(method, convertedPath, proxyAndTransform)
 		}
 	}
