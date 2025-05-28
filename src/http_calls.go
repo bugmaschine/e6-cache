@@ -278,7 +278,7 @@ func proxyAndTransform(c *gin.Context) {
 }
 
 func proxyFile(c *gin.Context) {
-	fileID := c.Param("File_ID")
+	fileID := c.Param("fileId")
 	sig := c.Query("sig")
 
 	if sig == "" {

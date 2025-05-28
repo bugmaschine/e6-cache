@@ -163,9 +163,24 @@ func main() {
 		// convert OpenAPI parameter syntax to Gin parameter syntax
 		convertedPath := re.ReplaceAllString(path, ":$1")
 
-		// remove leading slash and extension
+		// get the parameter for later use
+		matches := re.FindStringSubmatch(path)
+		var param string
+		if len(matches) > 1 {
+			param = fmt.Sprintf(":%s", matches[1]) // this is $1
+		}
+
+		// remove leading slash
 		convertedPath = strings.TrimPrefix(convertedPath, "/")
-		convertedPath = extRegex.ReplaceAllString(convertedPath, "")
+
+		// only remove the extension if it's not a parameter, otherwise it will break the route
+		// this is here to preserve cases like /posts.json
+		if strings.HasSuffix(extRegex.ReplaceAllString(convertedPath, ""), param) && param != "" {
+			convertedPath = extRegex.ReplaceAllString(convertedPath, "")
+			logging.Debug("Removed extension from path: ", convertedPath)
+		} else {
+			logging.Debug("Preserving extension in path: ", convertedPath, " because it's a parameter or doesn't have an extension")
+		}
 
 		if slices.Contains(registeredRoutes, convertedPath) {
 			logging.Warn("Duplicate route detected: ", convertedPath)
@@ -182,7 +197,7 @@ func main() {
 	logging.Info(fmt.Sprintf("Registered %d routes from OpenAPI spec", len(doc.Paths.InMatchingOrder())))
 
 	// Proxy files from S3, if not save them.
-	router.GET("/proxy/:File_ID", proxyFile)
+	router.GET("/proxy/:fileId", proxyFile)
 
 	router.GET("/", func(c *gin.Context) {
 		c.String(200, "e6-cache is running. Use this as the instance in your preffered client.\n"+
