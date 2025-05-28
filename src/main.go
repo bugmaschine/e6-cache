@@ -23,9 +23,10 @@ var (
 	Database      DB
 	useragentBase = "e6-cache (https://github.com/bugmaschine/e6-cache)"
 	port          = ":8080"
-	Key           []byte          // gets randomly generated every launch, and used for signing the urls.
-	maxCacheAge   = 1 * time.Hour // idk what's a good value, but 1 hours seems enough
-	Signer        *signer.Signer  // feel free to sugest a better name
+	Key           []byte            // gets randomly generated every launch, and used for signing the urls.
+	maxCacheAge   = 1 * time.Hour   // idk what's a good value, but 1 hours seems enough
+	Signer        *signer.Signer    // feel free to sugest a better name
+	globalTimeout = 5 * time.Second // global timeout for requests to e6, if it takes longer than this, we assume the request failed.
 
 	// env stuff
 
@@ -108,7 +109,7 @@ func main() {
 
 	// setup s3
 	logging.Info("Connecting to S3...")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), globalTimeout)
 	defer cancel()
 	s3Svc, err := NewS3Service(ctx, S3_REGION, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET_NAME)
 	if err != nil {
@@ -125,6 +126,7 @@ func main() {
 	}
 
 	router.ForwardedByClientIP = true
+	router.Use(gin.Recovery())
 
 	// Routes implementing caching
 

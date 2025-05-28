@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -78,7 +79,8 @@ func proxyAndTransform(c *gin.Context) {
 		}
 		// parse it into username, password and proxy auth
 		authParts := strings.Split(string(decodedAuth), ":")
-		suppliedProxyAuth := authParts[1] // if you want to check the password, set it to 2
+		suppliedProxyAuth := authParts[1] // to change the password position you need to change this here. 1 is after the username, 2 is after the proxy auth
+		logging.Debug("Parsed Proxy Authorization header: ", authParts)
 		if len(authParts) != 3 || suppliedProxyAuth != PROXY_AUTH {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 			return
@@ -86,8 +88,9 @@ func proxyAndTransform(c *gin.Context) {
 
 		c.Request.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(authParts[0]+":"+authParts[2])))
 	} else {
-
+		// this gets run if the proxy auth function not enabled
 		if auth == "" {
+			logging.Debug("No Authorization header found, using anonymous user")
 			requestUsername = "anonymous"
 		}
 
@@ -172,10 +175,9 @@ func proxyAndTransform(c *gin.Context) {
 		defer reader.Close()
 
 	default:
+		logging.Debug("Server sent uncompressed response")
 		reader = resp.Body
 	}
-
-	//Accept-Encoding:[gzip, compress, deflate, br]
 
 	// Read response body
 	respBody, err := io.ReadAll(reader)
@@ -184,6 +186,7 @@ func proxyAndTransform(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response body"})
 		return
 	}
+
 	// check for rate limit
 	if resp.StatusCode == 501 {
 		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Rate limit exceeded"})
@@ -248,7 +251,7 @@ func proxyAndTransform(c *gin.Context) {
 
 		for _, pool := range pools {
 			// Store in DB
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), globalTimeout)
 			defer cancel()
 			Database.UpdatePool(ctx, &pool)
 		}
@@ -263,7 +266,7 @@ func proxyAndTransform(c *gin.Context) {
 		}
 
 		// Store in DB
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), globalTimeout)
 		defer cancel()
 		Database.UpdatePool(ctx, &pool)
 
@@ -416,11 +419,11 @@ func copyHeaders(src http.Header, dst http.Header) {
 }
 
 func ProcessPost(c *gin.Context, post *Post) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), globalTimeout)
 	defer cancel()
 	Database.CheckAndInsertPost(ctx, post)
 
-	// Rewrite url to go through proxy
+	// Rewrite url to go through the proxy
 	post.File.URL = makeProxyLink(post.File.URL)
 	post.Preview.URL = makeProxyLink(post.Preview.URL)
 	post.Sample.URL = makeProxyLink(post.Sample.URL)
@@ -434,7 +437,7 @@ func setUseragent(username string, req *http.Request) {
 		return
 	}
 
-	useragent = useragentBase + " (Request made on behalf of " + username + ")"
+	useragent = fmt.Sprintf("%s (Request made on behalf of %s)", useragentBase, username)
 
 	req.Header.Set("User-Agent", useragent)
 }
