@@ -64,13 +64,13 @@ After the container is running, you can access the API at `http://localhost:8080
 
 For most users i recommend using [e1547](https://github.com/clragon/e1547) as it has built-in support for custom instances.
 
-### e1547 Setup
+### e1547
 > [!IMPORTANT]
 > You need to have an public URL for the API to work with e1547, as it requires https.
 
 https://github.com/user-attachments/assets/d2304e64-0c08-4065-bd55-aaa24d13727e
 
-### The Wolf's Stash Setup
+### The Wolf's Stash
 For The Wolf's Stash, it just reports the host not being supported.
 
 ### Other Clients
