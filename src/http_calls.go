@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -46,15 +47,14 @@ func makeProxyLink(original string) string {
 
 	// if the route changes, we need to update this
 	proxiedURL := PROXY_URL + "/proxy/" + encodedUrl + "?sig=" + sig
-
-	logging.Info("Creating proxy url for file: ", original, " | ID: ", match[1], " | Proxied URL: ", proxiedURL)
+	logging.Info("Creating proxy url for file: %v | ID: %v | Proxied URL: %v", original, match[1], proxiedURL)
 
 	return proxiedURL
 }
 
 func proxyAndTransform(c *gin.Context) {
 
-	logging.Debug("Headers: ", c.Request.Header)
+	logging.Debug("Headers: %v", c.Request.Header)
 
 	auth := c.Request.Header.Get("Authorization")
 
@@ -72,13 +72,14 @@ func proxyAndTransform(c *gin.Context) {
 		auth = strings.TrimPrefix(auth, "Basic ")
 		decodedAuth, err := base64.StdEncoding.DecodeString(auth)
 		if err != nil {
-			logging.Error("Error decoding auth header: ", err)
+			logging.Error("Error decoding auth header: %v", err)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 			return
 		}
 		// parse it into username, password and proxy auth
 		authParts := strings.Split(string(decodedAuth), ":")
-		suppliedProxyAuth := authParts[1] // if you want to check the password, set it to 2
+		suppliedProxyAuth := authParts[1] // to change the password position you need to change this here. 1 is after the username, 2 is after the proxy auth
+		logging.Debug("Parsed Proxy Authorization header: %v", authParts)
 		if len(authParts) != 3 || suppliedProxyAuth != PROXY_AUTH {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 			return
@@ -86,8 +87,9 @@ func proxyAndTransform(c *gin.Context) {
 
 		c.Request.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(authParts[0]+":"+authParts[2])))
 	} else {
-
+		// this gets run if the proxy auth function not enabled
 		if auth == "" {
+			logging.Debug("No Authorization header found, using anonymous user")
 			requestUsername = "anonymous"
 		}
 
@@ -124,8 +126,8 @@ func proxyAndTransform(c *gin.Context) {
 	// useragent stuff
 	setUseragent(requestUsername, req)
 
-	logging.Debug("Host: ", c.Request.Host)
-	logging.Debug("Proxied Headers: ", req.Header)
+	logging.Debug("Host: %v", c.Request.Host)
+	logging.Debug("Proxied Headers: %v", req.Header)
 
 	// Perform request
 	resp, err := http.DefaultClient.Do(req)
@@ -172,10 +174,9 @@ func proxyAndTransform(c *gin.Context) {
 		defer reader.Close()
 
 	default:
+		logging.Debug("Server sent uncompressed response")
 		reader = resp.Body
 	}
-
-	//Accept-Encoding:[gzip, compress, deflate, br]
 
 	// Read response body
 	respBody, err := io.ReadAll(reader)
@@ -184,13 +185,14 @@ func proxyAndTransform(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response body"})
 		return
 	}
+
 	// check for rate limit
 	if resp.StatusCode == 501 {
 		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Rate limit exceeded"})
 		return
 	}
 
-	logging.Debug("Response Body: ", string(respBody))
+	logging.Debug("Response Body: %v", string(respBody))
 
 	switch {
 	case strings.HasSuffix(c.Request.URL.Path, "/comments.json") && c.Query("search[post_id]") != "": // specific post comments are returned differently
@@ -208,14 +210,14 @@ func proxyAndTransform(c *gin.Context) {
 			return
 		}
 
-		logging.Info("Saving ", len(comments), " comments")
+		logging.Info("Saving %v comments", len(comments))
 		Database.SaveComments(comments)
 		respBody, _ = json.Marshal(comments)
 	case strings.HasSuffix(c.Request.URL.Path, "/posts.json") || strings.HasSuffix(c.Request.URL.Path, "/comments.json"): // comments and posts seem to be the same thing
 		var posts PostsResponse
 
 		if err := json.Unmarshal(respBody, &posts); err != nil {
-			logging.Debug("Response Body: ", string(respBody))
+			logging.Debug("Response Body: %v", string(respBody))
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid response format", "ok": false})
 			return
 		}
@@ -230,7 +232,7 @@ func proxyAndTransform(c *gin.Context) {
 
 		if err := json.Unmarshal(respBody, &post); err != nil {
 
-			logging.Debug("Response Body: ", string(respBody))
+			logging.Debug("Response Body: %v", string(respBody))
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid response format", "ok": false})
 			return
 		}
@@ -248,7 +250,7 @@ func proxyAndTransform(c *gin.Context) {
 
 		for _, pool := range pools {
 			// Store in DB
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), globalTimeout)
 			defer cancel()
 			Database.UpdatePool(ctx, &pool)
 		}
@@ -263,7 +265,7 @@ func proxyAndTransform(c *gin.Context) {
 		}
 
 		// Store in DB
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), globalTimeout)
 		defer cancel()
 		Database.UpdatePool(ctx, &pool)
 
@@ -275,7 +277,7 @@ func proxyAndTransform(c *gin.Context) {
 }
 
 func proxyFile(c *gin.Context) {
-	fileID := c.Param("File_ID")
+	fileID := c.Param("fileId")
 	sig := c.Query("sig")
 
 	if sig == "" {
@@ -305,11 +307,11 @@ func proxyFile(c *gin.Context) {
 	c.Header("Expires", time.Now().Add(time.Duration(maxCacheAge)*time.Second).Format(http.TimeFormat))
 
 	if fileExists && err == nil {
-		logging.Info("File exists in S3, downloading: ", string(url))
+		logging.Info("File exists in S3, downloading: %v", string(url))
 
 		body, err := S3.StreamFromS3(c, string(CleanFileID))
 		if err != nil {
-			logging.Error("Error downloading from S3: ", err)
+			logging.Error("Error downloading from S3: %v", err)
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to download from S3", "ok": false})
 			return
 		}
@@ -383,12 +385,12 @@ func proxyFile(c *gin.Context) {
 
 	// upload to S3 in the background, while the user is downloading the file
 	go func() {
-		logging.Info("Uploading to S3: ", string(CleanFileID))
+		logging.Info("Uploading to S3: %v", string(CleanFileID))
 		err := S3.UploadToS3(c, r1, string(CleanFileID))
 		if err != nil {
-			logging.Error("Failed to upload to S3", err)
+			logging.Error("Failed to upload to S3: %v", err)
 		}
-		logging.Info("Upload to S3 complete: ", string(CleanFileID))
+		logging.Info("Upload to S3 complete: %v", string(CleanFileID))
 	}()
 
 	// Stream live to user (I hope it's actually streaming)
@@ -416,11 +418,11 @@ func copyHeaders(src http.Header, dst http.Header) {
 }
 
 func ProcessPost(c *gin.Context, post *Post) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), globalTimeout)
 	defer cancel()
 	Database.CheckAndInsertPost(ctx, post)
 
-	// Rewrite url to go through proxy
+	// Rewrite url to go through the proxy
 	post.File.URL = makeProxyLink(post.File.URL)
 	post.Preview.URL = makeProxyLink(post.Preview.URL)
 	post.Sample.URL = makeProxyLink(post.Sample.URL)
@@ -434,7 +436,7 @@ func setUseragent(username string, req *http.Request) {
 		return
 	}
 
-	useragent = useragentBase + " (Request made on behalf of " + username + ")"
+	useragent = fmt.Sprintf("%s (Request made on behalf of %s)", useragentBase, username)
 
 	req.Header.Set("User-Agent", useragent)
 }

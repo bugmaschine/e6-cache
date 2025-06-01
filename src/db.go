@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -80,23 +79,23 @@ func (d *DB) CreatePost(ctx context.Context, p *Post) error {
 	)
 
 	if err != nil {
-		logging.Error("Error inserting post: ", err)
+		logging.Error("Error inserting post: %v", err)
 	}
 	return err
 }
 
 func (d *DB) CheckAndInsertPost(ctx context.Context, p *Post) error {
-	logging.Info("Checking if post exists: ", p.ID)
+	logging.Info("Checking if post exists: %v", p.ID)
 	const existsQuery = `SELECT 1 FROM posts WHERE id = $1`
 	row := d.db.QueryRowContext(ctx, existsQuery, p.ID)
 	var dummy int
 	err := row.Scan(&dummy)
 	switch {
 	case err == sql.ErrNoRows:
-		logging.Info("Post does not exist, inserting: ", p.ID)
+		logging.Error("Post does not exist, inserting: %v", p.ID)
 		return d.CreatePost(ctx, p)
 	case err != nil:
-		log.Println("Error checking post existence: ", err)
+		logging.Error("Error checking post existence: %v", err)
 		return err
 	default:
 		// Row exists, nothing to do
@@ -143,7 +142,7 @@ func (d *DB) SaveComments(comments []Comment) error {
 			c.UpdaterName,
 		)
 		if err != nil {
-			logging.Error(err.Error())
+			logging.Error("%v", err.Error())
 			return err
 		}
 	}
@@ -227,7 +226,7 @@ func (d *DB) UpdatePost(ctx context.Context, p *Post) error {
 		p.ApproverID, p.UploaderID, p.Description, p.CommentCount, p.IsFavorited,
 	)
 	if err != nil {
-		logging.Error("Error updating post: ", err)
+		logging.Error("Error updating post: %v", err)
 	}
 	return err
 }
@@ -236,7 +235,7 @@ func (d *DB) UpdatePost(ctx context.Context, p *Post) error {
 func (d *DB) DeletePost(ctx context.Context, id int64) error {
 	_, err := d.db.ExecContext(ctx, `DELETE FROM posts WHERE id = $1`, id)
 	if err != nil {
-		logging.Error("Error deleting post: ", err)
+		logging.Error("Error deleting post: %v", err)
 	}
 	return err
 }
@@ -271,20 +270,20 @@ func (d *DB) UpdatePool(ctx context.Context, p *Pool) error {
 		p.Description, p.IsActive, p.Category, p.PostCount,
 	)
 	if err != nil {
-		logging.Error("error upserting pool: ", err)
+		logging.Error("error upserting pool: %v", err)
 		return err
 	}
 
 	_, err = tx.ExecContext(ctx, `DELETE FROM pool_posts WHERE pool_id = $1`, p.ID)
 	if err != nil {
-		logging.Error("error clearing pool_posts: ", err)
+		logging.Error("error clearing pool_posts: %v", err)
 		return err
 	}
 
 	for _, postID := range p.PostIDs {
 		_, err = tx.ExecContext(ctx, `INSERT INTO pool_posts (pool_id, post_id) VALUES ($1, $2)`, p.ID, postID)
 		if err != nil {
-			logging.Error("error inserting pool_post: ", err)
+			logging.Error("error inserting pool_post: %v", err)
 			return err
 		}
 	}
