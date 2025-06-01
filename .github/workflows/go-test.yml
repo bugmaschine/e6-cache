@@ -16,14 +16,14 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
-      - name: Change in to src
-        run: cd src
       - name: Install dependencies
         run: go get .
+        working-directory: ./src
       - name: Test with Go
         run: go test -json > TestResults-${{ matrix.go-version }}.json
+        working-directory: ./src
       - name: Upload Go test results
         uses: actions/upload-artifact@v4
         with:
           name: Go-results-${{ matrix.go-version }}
-          path: TestResults-${{ matrix.go-version }}.json
+          path: src/TestResults-${{ matrix.go-version }}.json
