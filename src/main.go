@@ -89,7 +89,7 @@ func loadEnv() {
 	PROXY_AUTH = os.Getenv("PROXY_AUTH")
 
 	if PROXY_AUTH != "" {
-		logging.Info("Proxy auth is enabled with key: ", PROXY_AUTH)
+		logging.Info("Proxy auth is enabled with key: %v", PROXY_AUTH)
 	} else {
 		logging.Info("Proxy auth is disabled")
 	}
@@ -105,13 +105,13 @@ func main() {
 	// generate signing key
 	Key = signer.GenerateSecretKey()
 	Signer = signer.NewSigner(Key)
-	logging.Debug("Generated key: ", Key)
+	logging.Debug("Generated key: %v", Key)
 
 	// setup db
 	logging.Info("Connecting to DB...")
 	d, err := newDB(DB_HOST, DB_NAME, DB_USER, DB_PASS, DB_PORT)
 	if err != nil {
-		logging.Info("Failed to connect to DB (is it up?): ", err)
+		logging.Info("Failed to connect to DB (is it up?): %v", err)
 		return
 	}
 	Database = d
@@ -123,7 +123,7 @@ func main() {
 	defer cancel()
 	s3Svc, err := NewS3Service(ctx, S3_REGION, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET_NAME)
 	if err != nil {
-		logging.Fatal("Failed to connect to S3: ", err)
+		logging.Fatal("Failed to connect to S3: %v", err)
 	}
 	S3 = *s3Svc
 	logging.Info("Connected to S3!")
@@ -147,7 +147,7 @@ func main() {
 			"Server is caching following url: "+baseURL)
 	})
 
-	logging.Info("Started router at ", port)
+	logging.Info("Started router at %v", port)
 	router.Run(port)
 }
 
@@ -171,10 +171,10 @@ func parseOpenAPIRoutes(openapifile []byte, router *gin.Engine) {
 	for _, path := range doc.Paths.InMatchingOrder() {
 		pathItem := doc.Paths.Find(path)
 		if pathItem == nil {
-			logging.Warn("Path item not found for path: ", path)
+			logging.Warn("Path item not found for path: %v", path)
 			continue
 		}
-		logging.Debug("Processing path: ", path)
+		logging.Debug("Processing path: %v", path)
 
 		// convert OpenAPI parameter syntax to Gin parameter syntax
 		convertedPath := re.ReplaceAllString(path, ":$1")
@@ -193,23 +193,23 @@ func parseOpenAPIRoutes(openapifile []byte, router *gin.Engine) {
 		// this is here to preserve cases like /posts.json
 		if strings.HasSuffix(extRegex.ReplaceAllString(convertedPath, ""), param) && param != "" {
 			convertedPath = extRegex.ReplaceAllString(convertedPath, "")
-			logging.Debug("Removed extension from path: ", convertedPath)
+			logging.Debug("Removed extension from path: %v", convertedPath)
 		} else {
-			logging.Debug("Preserving extension in path: ", convertedPath, " because it's a parameter or doesn't have an extension")
+			logging.Debug("Preserving extension in path: %v because it's a parameter or doesn't have an extension", convertedPath)
 		}
 
 		if slices.Contains(registeredRoutes, convertedPath) {
-			logging.Warn("Duplicate route detected: ", convertedPath)
+			logging.Warn("Duplicate route detected: %v", convertedPath)
 			continue
 		}
 
 		registeredRoutes = append(registeredRoutes, convertedPath)
 		for method := range pathItem.Operations() {
-			logging.Debug("Adding route: ", method, " ", convertedPath)
+			logging.Debug("Adding route: %v %v", method, convertedPath)
 			router.Handle(method, convertedPath, proxyAndTransform)
 		}
 	}
 
-	logging.Info(fmt.Sprintf("Registered %d routes from OpenAPI spec", len(doc.Paths.InMatchingOrder())))
+	logging.Info("Registered %d routes from OpenAPI spec", len(doc.Paths.InMatchingOrder()))
 
 }
