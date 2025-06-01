@@ -1,6 +1,8 @@
 name: Upload Go test results
 # https://docs.github.com/en/actions/use-cases-and-examples/building-and-testing/building-and-testing-go
 on: [push]
+permissions:
+  contents: read
 
 jobs:
   build:
