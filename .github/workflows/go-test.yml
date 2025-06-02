@@ -22,7 +22,10 @@ jobs:
         run: go get .
         working-directory: ./src
       - name: Test with Go
-        run: go test -json > TestResults-${{ matrix.go-version }}.json
+        run: go test -json ./... > TestResults-${{ matrix.go-version }}.json
+        working-directory: ./src
+      - name: Print Test Results
+        run: cat TestResults-${{ matrix.go-version }}.json
         working-directory: ./src
       - name: Upload Go test results
         uses: actions/upload-artifact@v4
