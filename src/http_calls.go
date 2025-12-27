@@ -306,8 +306,14 @@ func proxyFile(c *gin.Context) {
 	c.Header("Cache-Control", "public, max-age="+strconv.Itoa(int(maxCacheAge.Seconds())))
 	c.Header("Expires", time.Now().Add(time.Duration(maxCacheAge)*time.Second).Format(http.TimeFormat))
 
+	// always increment total proxied files
+	totalProxiedFiles += 1
+
 	if fileExists && err == nil {
 		logging.Info("File exists in S3, downloading: %v", string(url))
+
+		// increment cache hits if file exists
+		totalCacheHits += 1
 
 		body, err := S3.StreamFromS3(c, string(CleanFileID))
 		if err != nil {
@@ -439,4 +445,13 @@ func setUseragent(username string, req *http.Request) {
 	useragent = fmt.Sprintf("%s (Request made on behalf of %s)", useragentBase, username)
 
 	req.Header.Set("User-Agent", useragent)
+}
+
+func getStats(c *gin.Context) {
+	stats := gin.H{
+		"total_proxied_files": totalProxiedFiles,
+		"total_cache_hits":    totalCacheHits,
+	}
+
+	c.JSON(http.StatusOK, stats)
 }

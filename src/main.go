@@ -59,6 +59,10 @@ var (
 
 	//go:embed "openapi/e621.yaml"
 	e621OpenApiRoutes []byte // embedded OpenAPI routes, used to dynamically register the routes in the gin router.
+
+	// stats
+	totalProxiedFiles int64 = 0
+	totalCacheHits    int64 = 0
 )
 
 func loadEnv() {
@@ -146,6 +150,12 @@ func main() {
 			"Make sure to set the base URL in your client to: "+PROXY_URL+"\n"+
 			"Server is caching following url: "+baseURL)
 	})
+
+	router.GET("/health", func(c *gin.Context) {
+		c.String(200, "OK")
+	})
+
+	router.GET("/stats", getStats)
 
 	logging.Info("Started router at %v", port)
 	router.Run(port)
