@@ -157,7 +157,7 @@ func main() {
 
 	router.GET("/stats", getStats)
 
-	logging.Info("Started router at %v", port)
+	logging.Info("Started e6-cache at %v", port)
 	router.Run(port)
 }
 
